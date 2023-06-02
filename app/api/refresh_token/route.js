@@ -3,16 +3,16 @@ import { NextResponse } from 'next/server';
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const token = searchParams.get('token');
+  const refresh_token = searchParams.get('refresh_token');
+  const auth = `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
   const authOptions = {
-    url: 'https://api.spotify.com/v1/me/playlists',
+    url: 'https://accounts.spotify.com/api/token',
     form: {
-      code: code,
-      redirect_uri: redirect_uri,
-      grant_type: 'authorization_code'
+      grant_type: 'refresh_token',
+      refresh_token: refresh_token
     },
     headers: {
-      'Authorization': 'Bearer ' + token,
+      'Authorization': 'Basic ' + Buffer.from(auth).toString('base64'),
       'Content-Type': 'application/x-www-form-urlencoded'
     },
   };
