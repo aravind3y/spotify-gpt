@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 
-var redirect_uri = 'http://localhost:3000/songs';
+var redirect_uri = `${process.env.REDIRECT_URI}/songs`;
 
 export async function GET(request) {
   const params = new URLSearchParams({

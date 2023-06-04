@@ -1,7 +1,7 @@
 
 import { NextResponse } from 'next/server';
 
-const redirect_uri = 'http://localhost:3000/songs';
+const redirect_uri = `${process.env.REDIRECT_URI}/songs`;
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
