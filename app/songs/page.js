@@ -17,12 +17,63 @@ import Link from "next/link"
 import Image from "next/image"
 import { useSearchParams } from 'next/navigation'
 
+const getArtists = (artists) => {
+  const truncatedArtists = artists.slice(0, 3);
+  return truncatedArtists.map(artist => artist.name).join(', ');
+}
 
+const SongsTable = ({playlistSongs, checkedSongs, setCheckedSongs}) => (
+  <Table>
+    <TableCaption>A list of your playlist songs</TableCaption>
+    <TableHeader>
+      <TableRow>
+        {/* <TableHead></TableHead> */}
+        <TableHead className="w-[100px]"></TableHead>
+        <TableHead>Name</TableHead>
+        <TableHead>Album</TableHead>
+        <TableHead>Actions</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {playlistSongs.map((track) => (
+        <TableRow key={ track.id }>
+          {/* <TableCell>
+            <Checkbox
+              checked={checkedSongs[track.id]}
+              onCheckedChange={(value) => setCheckedSongs({...checkedSongs, [track.id]: !!value})}
+              aria-label="Select row"
+            />
+          </TableCell> */}
+          <TableCell>
+            <div className="overflow-hidden rounded-md w-[50px]">
+              <Image
+                src={track.album?.images[0]?.url}
+                alt={track.album.name}
+                width={100}
+                height={100}
+                className="w-[50px] h-[50px] object-cover transition-all hover:scale-105"
+              />
+            </div>
+          </TableCell>
+          <TableCell>
+            <div className="space-y-1 text-sm">
+              <h3 className="font-medium leading-none">{track.name}</h3>
+              <p className="text-xs text-muted-foreground">{getArtists(track.artists)}</p>
+            </div>
+          </TableCell>
+          <TableCell>{track.album.name}</TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+);
 
 export default function Home() {
   const [token, setToken] = useState('');
   const [playlists, setPlaylists] = useState([]);
-  const [songs, setSongs] = useState([]);
+  const [playlistSongs, setPlaylistSongs] = useState([]);
+  const [chatgptSongs, setChatgptSongs] = useState([]);
+  const [searchedSongs, setSearchedSongs] = useState([]);
   const [checkedSongs, setCheckedSongs] = useState({});
   const searchParams = useSearchParams();
   const code = searchParams.get('code');
@@ -51,6 +102,16 @@ export default function Home() {
     </div>
   )
 
+  const refreshToken = async () => {
+    if (!token.refresh_token) {
+      throw new Error('No refresh token');
+    }
+    const url = '/api/token?refresh_token=' + token.refresh_token;
+    const tokenRes = await fetch(url);
+    const data = await tokenRes.json();
+    setToken(data);
+  }
+  
   const fetchSpotifyData = async (url) => {
     const headers = {
       'Authorization': `Bearer ${token.access_token}` 
@@ -58,20 +119,33 @@ export default function Home() {
     console.log(url, headers);
     let response = await fetch(url, { headers });
     if (!response.ok) {
-      if (!token.refresh_token) {
-        throw new Error('No refresh token');
-      }
-      const url = '/api/token?refresh_token=' + token.refresh_token;
-      const tokenRes = await fetch(url);
-      const data = await tokenRes.json();
-      setToken(data);
+      refreshToken();
       response = await fetch(url, { headers });
     }
     if (!response.ok) {
-      throw new Error(data.error.message);
+      throw new Error('Failed to fetch data');
     }
     const data = await response.json();
     return data;
+  }
+
+  const addSongToPlaylist = async (song_id, playlist_id) => {
+    const headers = {
+      'Authorization': `Bearer ${token.access_token}`,
+      'Content-Type': 'application/json', 
+    };
+    const url = `https://api.spotify.com/v1/playlists/${playlist_id}/tracks`;
+    const data = {
+      'uris': [`spotify:track:${song_id}`]
+    }
+    let response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(data) });
+    if (!response.ok) {
+      refreshToken();
+      response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(data) });
+    }
+    if (!response.ok) {
+      throw new Error('Failed to add song to playlist');
+    }
   }
 
   const fetchPlaylists = async () => {
@@ -82,7 +156,7 @@ export default function Home() {
 
   const fetchSongs = async ({ href: url }) => {
     const data = await fetchSpotifyData(url);
-    setSongs(data.items);
+    setPlaylistSongs(data.items.map(item => item.track));
   }
 
   const searchSongs = async (name, artist) => {
@@ -90,20 +164,29 @@ export default function Home() {
     const url = `https://api.spotify.com/v1/search?type=track&limit=1&q=${encodeURIComponent(qry)}`;
     const data = await fetchSpotifyData(url);
     console.log(data);
-  }
-
-  const getArtists = (artists) => {
-    const truncatedArtists = artists.slice(0, 3);
-    return truncatedArtists.map(artist => artist.name).join(', ');
+    const track = data?.tracks?.items?.[0];
+    return track;
   }
 
   const getChatGptRecommendations = async () => {
-    let prompt = 'These are music from my playlist. Recommend me songs that match my taste in csv format with no extra text.'
-    prompt += '\n\n' + songs.map(song => song.track.name + ' by ' + getArtists(song.track.artists)).join('\n');
+    let prompt = 'These are music from my playlist. Recommend me songs that match my taste in same format with no extra text. '
+    prompt += playlistSongs.filter(song => song.name).map(song => song.name + ' by ' + getArtists(song.artists)).join(' | ');
     const url = `/api/chat_gpt?prompt=${encodeURIComponent(prompt)}`;
     const res = await fetch(url);
     const data = await res.json();
-    console.log(data);
+    const content = data.content.choices[0].message.content;
+    const songs = content.split(' | ').map(song => {
+      const [name, artist] = song.split(' by ');
+      return { name, artist };
+    })
+    setChatgptSongs(songs);
+    for (const song of songs) {
+      const searchedSong = await searchSongs(song.name, song.artist);
+      if (!searchedSong) {
+        continue;
+      }
+      setSearchedSongs(prev => [...prev, searchedSong]);
+    }
   }
     
   return (
@@ -125,48 +208,8 @@ export default function Home() {
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
     </div>
-    <Table>
-      <TableCaption>A list of your playlist songs</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead></TableHead>
-          <TableHead className="w-[100px]"></TableHead>
-          <TableHead>Name</TableHead>
-          <TableHead>Album</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {songs.map(({ track }) => (
-          <TableRow key={ track.id }>
-            <TableCell>
-            <Checkbox
-              checked={checkedSongs[track.id]}
-              onCheckedChange={(value) => setCheckedSongs({...checkedSongs, [track.id]: !!value})}
-              aria-label="Select row"
-            />
-            </TableCell>
-            <TableCell>
-              <div className="overflow-hidden rounded-md w-[50px]">
-                <Image
-                  src={track.album?.images[0]?.url}
-                  alt={track.album.name}
-                  width={100}
-                  height={100}
-                  className="w-[50px] h-[50px] object-cover transition-all hover:scale-105"
-                />
-              </div>
-            </TableCell>
-            <TableCell>
-              <div className="space-y-1 text-sm">
-                <h3 className="font-medium leading-none">{track.name}</h3>
-                <p className="text-xs text-muted-foreground">{getArtists(track.artists)}</p>
-              </div>
-            </TableCell>
-            <TableCell>{track.album.name}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <SongsTable key='searched' playlistSongs={searchedSongs}/>
+    <SongsTable key='all' playlistSongs={playlistSongs}/>
     </>
   )
 }
