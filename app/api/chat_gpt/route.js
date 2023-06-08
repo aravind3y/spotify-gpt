@@ -4,6 +4,11 @@ import { NextResponse } from 'next/server';
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const prompt = searchParams.get('prompt');
+  if (!prompt?.startsWith('These are music from my playlist')) {
+    return NextResponse.json({
+      'message': 'Invalid prompt'
+    }, { status: 400 });
+  }
   const authOptions = {
     url: 'https://api.openai.com/v1/chat/completions',
     data: {

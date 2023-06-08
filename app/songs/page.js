@@ -16,6 +16,7 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import Link from "next/link"
 import Image from "next/image"
 import { useSearchParams } from 'next/navigation'
+import { cn } from "@/lib/utils"
 
 const getArtists = (artists) => {
   const truncatedArtists = artists.slice(0, 3);
@@ -75,6 +76,7 @@ export default function Home() {
   const [chatgptSongs, setChatgptSongs] = useState([]);
   const [searchedSongs, setSearchedSongs] = useState([]);
   const [checkedSongs, setCheckedSongs] = useState({});
+  const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const searchParams = useSearchParams();
   const code = searchParams.get('code');
 
@@ -84,8 +86,13 @@ export default function Home() {
     window.history.replaceState(null, '', '/songs')
   }, [code])
 
+  const onClickPlaylist = (playlist) => {
+    setSelectedPlaylist(playlist);
+    fetchSongs(playlist.tracks);
+  }
+
   const PlayListCard = ({ playlist }) => (
-    <div className='w-[100px]' onClick={() => fetchSongs(playlist.tracks)}>
+    <div className='w-[100px]' onClick={() => onClickPlaylist(playlist)}>
       <div className="overflow-hidden rounded-lg mb-2">
         <Image
           src={playlist.images[0].url}
@@ -95,7 +102,7 @@ export default function Home() {
           className="w-[100px] h-[100px] object-cover transition-all hover:scale-105"
         />
       </div>
-      <div className="space-y-1 text-sm">
+      <div className={cn("space-y-1 text-sm", { 'bg-slate-300 rounded-lg p-1': selectedPlaylist?.id === playlist.id })}>
         <h3 className="font-medium leading-none">{playlist.name}</h3>
         <p className="text-xs text-muted-foreground">{playlist.tracks.total} songs</p>
       </div>
@@ -129,14 +136,15 @@ export default function Home() {
     return data;
   }
 
-  const addSongToPlaylist = async (song_id, playlist_id) => {
+  const addSongToPlaylist = async (song_ids) => {
+    const playlist_id = selectedPlaylist.id;
     const headers = {
       'Authorization': `Bearer ${token.access_token}`,
       'Content-Type': 'application/json', 
     };
     const url = `https://api.spotify.com/v1/playlists/${playlist_id}/tracks`;
     const data = {
-      'uris': [`spotify:track:${song_id}`]
+      'uris': song_ids.map(song_id => `spotify:track:${song_id}`)
     }
     let response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(data) });
     if (!response.ok) {
@@ -156,7 +164,7 @@ export default function Home() {
 
   const fetchSongs = async ({ href: url }) => {
     const data = await fetchSpotifyData(url);
-    setPlaylistSongs(data.items.map(item => item.track));
+    setPlaylistSongs(data.items.map(item => item.track).filter(song => song.name));
   }
 
   const searchSongs = async (name, artist) => {
@@ -169,7 +177,7 @@ export default function Home() {
   }
 
   const getChatGptRecommendations = async () => {
-    let prompt = 'These are music from my playlist. Recommend me songs that match my taste in same format with no extra text. '
+    let prompt = 'These are music from my playlist. Recommend me songs excluding those I already provided, that match my taste in same format with no extra text. '
     prompt += playlistSongs.filter(song => song.name).map(song => song.name + ' by ' + getArtists(song.artists)).join(' | ');
     const url = `/api/chat_gpt?prompt=${encodeURIComponent(prompt)}`;
     const res = await fetch(url);
@@ -180,24 +188,31 @@ export default function Home() {
       return { name, artist };
     })
     setChatgptSongs(songs);
-    for (const song of songs) {
-      const searchedSong = await searchSongs(song.name, song.artist);
-      if (!searchedSong) {
-        continue;
-      }
-      setSearchedSongs(prev => [...prev, searchedSong]);
-    }
+    const songPromises = songs.map(song => searchSongs(song.name, song.artist));
+    Promise.all(songPromises).then(songs => {
+      setSearchedSongs(songs);
+    });
   }
     
   return (
     <>
-    <p>Songs</p>
-    <Button onClick={fetchPlaylists} className='m-4'>
-      Fetch playlists
-    </Button>
-    <Button onClick={getChatGptRecommendations} className='m-4'>
-      Search
-    </Button>
+    <div className="space-between flex items-center">
+      <div className="flex items-center justify-between m-4">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-semibold tracking-tight">
+            MusicGPT
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Songs recommended by ChatGPT
+          </p>
+        </div>
+      </div>
+      <div className="ml-auto">
+      <Button onClick={fetchPlaylists} variant='destructive' className='m-4'>
+        Fetch playlists
+      </Button>
+      </div>
+    </div>
     <div className="relative pl-4">
       <ScrollArea>
         <div className="flex space-x-4 pb-4">
@@ -208,7 +223,23 @@ export default function Home() {
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
     </div>
-    <SongsTable key='searched' playlistSongs={searchedSongs}/>
+    <Button onClick={() => addSongToPlaylist(searchedSongs.map(s => s.id))} className='m-4 float-right'>
+      Add to playlist
+    </Button>
+    <Button onClick={getChatGptRecommendations} className='m-4 float-right'>
+      Do AI magic
+    </Button>
+    {(searchedSongs?.length > 0) && (
+      <>
+        <h2 className="text-2xl font-semibold tracking-tight m-4">
+          Recommended music
+        </h2>
+        <SongsTable key='searched' playlistSongs={searchedSongs}/>
+      </>
+    )}
+    <h2 className="text-2xl font-semibold tracking-tight m-4">
+      Your Music
+    </h2>
     <SongsTable key='all' playlistSongs={playlistSongs}/>
     </>
   )
