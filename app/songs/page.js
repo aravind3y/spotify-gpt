@@ -12,6 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Skeleton } from "@/components/ui/skeleton"
+
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import Link from "next/link"
 import Image from "next/image"
@@ -20,6 +22,8 @@ import { cn } from "@/lib/utils"
 
 import { isEmpty } from 'lodash';
 import { Loader } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
+
 
 const getArtists = (artists) => {
   const truncatedArtists = artists.slice(0, 3);
@@ -35,7 +39,7 @@ const SongsTable = ({playlistSongs, checkedSongs, setCheckedSongs}) => (
         <TableHead className="w-[100px]"></TableHead>
         <TableHead>Name</TableHead>
         <TableHead>Album</TableHead>
-        <TableHead>Actions</TableHead>
+        {/* <TableHead>Actions</TableHead> */}
       </TableRow>
     </TableHeader>
     <TableBody>
@@ -72,6 +76,43 @@ const SongsTable = ({playlistSongs, checkedSongs, setCheckedSongs}) => (
   </Table>
 );
 
+const LoadingTable = () => (
+  <Table>
+    <TableHeader>
+      <TableRow>
+        {/* <TableHead></TableHead> */}
+        <TableHead className="w-[100px]"></TableHead>
+        <TableHead>Name</TableHead>
+        <TableHead>Album</TableHead>
+        {/* <TableHead>Actions</TableHead> */}
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      <TableRow key='loading'>
+        {/* <TableCell>
+          <Checkbox
+            checked={checkedSongs[track.id]}
+            onCheckedChange={(value) => setCheckedSongs({...checkedSongs, [track.id]: !!value})}
+            aria-label="Select row"
+          />
+        </TableCell> */}
+        <TableCell>
+          <div className="overflow-hidden rounded-md w-[50px]">
+            <Skeleton className="h-[50px] w-[50px]" />
+          </div>
+        </TableCell>
+        <TableCell>
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-[250px]" />
+            <Skeleton className="h-4 w-[200px]" />
+          </div>
+        </TableCell>
+        <TableCell><Skeleton className="h-4 w-[250px]" /></TableCell>
+      </TableRow>
+    </TableBody>
+  </Table>
+);
+
 export default function Home() {
   const [token, setToken] = useState('');
   const [playlists, setPlaylists] = useState([]);
@@ -86,7 +127,7 @@ export default function Home() {
   const [playlistSongsLoading, setPlaylistSongsLoading] = useState(false);
   const [chatgptSongsLoading, setChatgptSongsLoading] = useState(false);
   const [addSongsLoading, setAddSongsLoading] = useState(false);
-  
+  const { toast } = useToast();
   const code = searchParams.get('code');
 
   useEffect(() => {
@@ -120,7 +161,11 @@ export default function Home() {
 
   const refreshToken = async () => {
     if (!token.refresh_token) {
-      throw new Error('No refresh token');
+      toast({
+        title: "Authorization expired",
+        description: "Auth token expired. Please re-login",
+      })
+      return;
     }
     const url = '/api/token?refresh_token=' + token.refresh_token;
     const tokenRes = await fetch(url);
@@ -138,7 +183,11 @@ export default function Home() {
       response = await fetch(url, { headers });
     }
     if (!response.ok) {
-      throw new Error('Failed to fetch data');
+      toast({
+        title: "Error",
+        description: "Please login again",
+      })
+      return;
     }
     const data = await response.json();
     return data;
@@ -146,7 +195,10 @@ export default function Home() {
 
   const addSongToPlaylist = async (song_ids) => {
     if (isEmpty(song_ids)) {
-      throw new Error('No songs selected');
+      toast({
+        description: "Load recommendations first",
+      })
+      return;
     }
     setAddSongsLoading(true);
     const playlist_id = selectedPlaylist.id;
@@ -165,7 +217,11 @@ export default function Home() {
     }
     setAddSongsLoading(false);
     if (!response.ok) {
-      throw new Error('Failed to add song to playlist');
+      toast({
+        title: "Error",
+        description: "Please login again",
+      })
+      return;
     }
   }
 
@@ -174,14 +230,14 @@ export default function Home() {
     setPlaylistsLoading(true);
     const data = await fetchSpotifyData(url);
     setPlaylistsLoading(false);
-    setPlaylists(data.items)
+    setPlaylists(data?.items || [])
   }
 
   const fetchSongs = async ({ href: url }) => {
     setPlaylistSongsLoading(true);
     const data = await fetchSpotifyData(url);
     setPlaylistSongsLoading(false);
-    setPlaylistSongs(data.items.map(item => item.track).filter(song => song.name));
+    setPlaylistSongs(data?.items.map(item => item.track).filter(song => song.name) || []);
   }
 
   const searchSongs = async (name, artist) => {
@@ -194,7 +250,10 @@ export default function Home() {
 
   const getChatGptRecommendations = async () => {
     if (isEmpty(playlistSongs)) {
-      throw new Error('No playlist songs')
+      toast({
+        description: "Load playlists and select a playlist first",
+      })
+      return;
     }
     let prompt = 'These are music from my playlist. Recommend me songs excluding those I already provided, that match my taste in same format with no extra text. '
     prompt += playlistSongs.filter(song => song.name).map(song => song.name + ' by ' + getArtists(song.artists)).join(' | ');
@@ -249,7 +308,7 @@ export default function Home() {
     <Button onClick={getChatGptRecommendations} className='m-4 float-right' disabled={chatgptSongsLoading}>
       Load recommendations
     </Button>
-    {(searchedSongs?.length > 0) && (
+    {!isEmpty(searchedSongs) && (
       <>
         <h2 className="text-2xl font-semibold tracking-tight m-4">
           Recommended music
@@ -257,6 +316,7 @@ export default function Home() {
         <SongsTable key='searched' playlistSongs={searchedSongs}/>
       </>
     )}
+    {true && <LoadingTable />}
     <h2 className="text-2xl font-semibold tracking-tight m-4">
       Your Music
     </h2>
