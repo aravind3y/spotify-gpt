@@ -316,7 +316,7 @@ export default function Home() {
         <SongsTable key='searched' playlistSongs={searchedSongs}/>
       </>
     )}
-    {true && <LoadingTable />}
+    {chatgptSongsLoading && <LoadingTable />}
     <h2 className="text-2xl font-semibold tracking-tight m-4">
       Your Music
     </h2>
