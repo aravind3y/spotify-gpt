@@ -18,6 +18,9 @@ import Image from "next/image"
 import { useSearchParams } from 'next/navigation'
 import { cn } from "@/lib/utils"
 
+import { isEmpty } from 'lodash';
+import { Loader } from "lucide-react"
+
 const getArtists = (artists) => {
   const truncatedArtists = artists.slice(0, 3);
   return truncatedArtists.map(artist => artist.name).join(', ');
@@ -78,6 +81,12 @@ export default function Home() {
   const [checkedSongs, setCheckedSongs] = useState({});
   const [selectedPlaylist, setSelectedPlaylist] = useState(null);
   const searchParams = useSearchParams();
+  
+  const [playlistsLoading, setPlaylistsLoading] = useState(false);
+  const [playlistSongsLoading, setPlaylistSongsLoading] = useState(false);
+  const [chatgptSongsLoading, setChatgptSongsLoading] = useState(false);
+  const [addSongsLoading, setAddSongsLoading] = useState(false);
+  
   const code = searchParams.get('code');
 
   useEffect(() => {
@@ -123,7 +132,6 @@ export default function Home() {
     const headers = {
       'Authorization': `Bearer ${token.access_token}` 
     };
-    console.log(url, headers);
     let response = await fetch(url, { headers });
     if (!response.ok) {
       refreshToken();
@@ -137,6 +145,10 @@ export default function Home() {
   }
 
   const addSongToPlaylist = async (song_ids) => {
+    if (isEmpty(song_ids)) {
+      throw new Error('No songs selected');
+    }
+    setAddSongsLoading(true);
     const playlist_id = selectedPlaylist.id;
     const headers = {
       'Authorization': `Bearer ${token.access_token}`,
@@ -151,6 +163,7 @@ export default function Home() {
       refreshToken();
       response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(data) });
     }
+    setAddSongsLoading(false);
     if (!response.ok) {
       throw new Error('Failed to add song to playlist');
     }
@@ -158,12 +171,16 @@ export default function Home() {
 
   const fetchPlaylists = async () => {
     const url = 'https://api.spotify.com/v1/me/playlists';
+    setPlaylistsLoading(true);
     const data = await fetchSpotifyData(url);
+    setPlaylistsLoading(false);
     setPlaylists(data.items)
   }
 
   const fetchSongs = async ({ href: url }) => {
+    setPlaylistSongsLoading(true);
     const data = await fetchSpotifyData(url);
+    setPlaylistSongsLoading(false);
     setPlaylistSongs(data.items.map(item => item.track).filter(song => song.name));
   }
 
@@ -171,15 +188,18 @@ export default function Home() {
     const qry = `${name} ${artist}`;
     const url = `https://api.spotify.com/v1/search?type=track&limit=1&q=${encodeURIComponent(qry)}`;
     const data = await fetchSpotifyData(url);
-    console.log(data);
     const track = data?.tracks?.items?.[0];
     return track;
   }
 
   const getChatGptRecommendations = async () => {
+    if (isEmpty(playlistSongs)) {
+      throw new Error('No playlist songs')
+    }
     let prompt = 'These are music from my playlist. Recommend me songs excluding those I already provided, that match my taste in same format with no extra text. '
     prompt += playlistSongs.filter(song => song.name).map(song => song.name + ' by ' + getArtists(song.artists)).join(' | ');
     const url = `/api/chat_gpt?prompt=${encodeURIComponent(prompt)}`;
+    setChatgptSongsLoading(true);
     const res = await fetch(url);
     const data = await res.json();
     const content = data.content.choices[0].message.content;
@@ -190,12 +210,13 @@ export default function Home() {
     setChatgptSongs(songs);
     const songPromises = songs.map(song => searchSongs(song.name, song.artist));
     Promise.all(songPromises).then(songs => {
-      setSearchedSongs(songs);
+      setSearchedSongs(songs.filter(song => song));
     });
+    setChatgptSongsLoading(false);
   }
     
   return (
-    <>
+    <div>
     <div className="space-between flex items-center">
       <div className="flex items-center justify-between m-4">
         <div className="space-y-1">
@@ -203,14 +224,12 @@ export default function Home() {
             MusicGPT
           </h2>
           <p className="text-sm text-muted-foreground">
-            Songs recommended by ChatGPT
+            Song recommendations powered by ChatGPT
           </p>
         </div>
-      </div>
-      <div className="ml-auto">
-      <Button onClick={fetchPlaylists} variant='destructive' className='m-4'>
-        Fetch playlists
-      </Button>
+        <Button onClick={fetchPlaylists} className='m-4' disabled={playlistsLoading}>
+          Load playlists
+        </Button>
       </div>
     </div>
     <div className="relative pl-4">
@@ -222,12 +241,13 @@ export default function Home() {
         </div>
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
+      <p className="text-sm text-muted-foreground">Select a playlist to display the songs</p>
     </div>
     <Button onClick={() => addSongToPlaylist(searchedSongs.map(s => s.id))} className='m-4 float-right'>
       Add to playlist
     </Button>
-    <Button onClick={getChatGptRecommendations} className='m-4 float-right'>
-      Do AI magic
+    <Button onClick={getChatGptRecommendations} className='m-4 float-right' disabled={chatgptSongsLoading}>
+      Load recommendations
     </Button>
     {(searchedSongs?.length > 0) && (
       <>
@@ -241,6 +261,6 @@ export default function Home() {
       Your Music
     </h2>
     <SongsTable key='all' playlistSongs={playlistSongs}/>
-    </>
+    </div>
   )
 }
